@@ -35,7 +35,7 @@ enum Op {
 #[derive(Debug)]
 enum Amode {
     Nothing, Accum, Rela, Immed,
-    Zp, Zpx, Zpy, Izpx, Izpy, Abs, Absx, Absy, Error,
+    Zp, Zpx, Zpy, Idrx, Idry, Abs, Absx, Absy, Error,
 }
 enum Addr {
     Reset = 0xfffa,
@@ -148,24 +148,49 @@ impl Chip {
         }
     }
 
-    fn load(&mut self, mode: Amode, pos: u16) -> u8 {
+    fn get_addr(&mut self, mode: Amode, pos: u16) -> u16 {
         use self::Amode::*;
-//        println!("load: {:?} at {:x}", mode, pos);
+        //        println!("load: {:?} at {:x}", mode, pos);
+        match mode {
+            Zp | Abs => pos,
+            Zpx => pos << 8 | self.x as u16,
+            Zpy => pos << 8 | self.y as u16,
+            Absx => pos.wrapping_add(self.x as u16),
+            Absy => pos.wrapping_add(self.y as u16),
+            Idrx => {
+                let pos = pos + self.x as u16;
+                self.read_mem(pos) as u16 |
+                (self.read_mem(pos+1) as u16) << 8
+            },
+            Idry => {
+                self.read_mem(pos).wrapping_add(self.x) as u16 |
+                (self.read_mem(pos+1) as u16) << 8
+            },
+            Accum | Immed | Nothing | Rela => unreachable!(),
+            Error => panic!("Invalid opcode"),
+        }
+    }
+    fn load(&mut self, mode: Amode, pos: u16) -> u8 {
         let ret = match mode {
-            Immed => pos as u8,
-            Absx => self.read_mem(pos.wrapping_add(self.x as u16)),
-            _ => unimplemented!(),
+            Amode::Immed => pos as u8,
+            Amode::Accum => self.a,
+            _ => {
+                let addr = self.get_addr(mode, pos);
+                self.read_mem(addr)
+            }
         };
         self.update_zs(ret);
         ret
     }
 
     fn store(&mut self, mode: Amode, pos: u16, v: u8) {
-//        println!("store: {:?} at {:x} with {:x}", mode, pos, v);
-        use self::Amode::*;
         match mode {
-            Zp | Abs => self.write_mem(pos, v),
-            _ => unimplemented!(),
+            Amode::Immed => panic!("Attempt to store immediate"),
+            Amode::Accum => self.a = v,
+            _ => {
+                let addr = self.get_addr(mode, pos);
+                self.write_mem(addr, v);
+            }
         }
     }
 
@@ -246,7 +271,7 @@ fn decode(code: u8) -> (u8, Op, Amode) {
 
     let (width, mode) = match addr_bits {
         0 => match code_bits {
-            1 => (1, Izpx),
+            1 => (1, Idrx),
             _ => (1, Immed),
         }
         1 => (1, Zp),
@@ -257,7 +282,7 @@ fn decode(code: u8) -> (u8, Op, Amode) {
         }
         3 => (2, Abs),
         4 => match code_bits {
-            1 => (1, Izpy),
+            1 => (1, Idry),
             _ => (0, Error),
         }
         5 => match unsafe { transmute(op) } {
