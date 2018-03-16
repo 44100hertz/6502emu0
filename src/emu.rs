@@ -32,7 +32,6 @@ enum Op {
     Standard(u8),
     Branch(StatFlag, bool),
 }
-#[derive(Debug)]
 enum Amode {
     Nothing, Accum, Rela, Immed,
     Zp, Zpx, Zpy, Idrx, Idry, Abs, Absx, Absy, Error,
@@ -73,6 +72,7 @@ pub struct Chip {
     status: u8,
     rom: Rom,
     mem: Vec<u8>,
+    running: bool,
 }
 #[derive(Copy, Clone, Debug)]
 enum StatFlag {
@@ -95,23 +95,24 @@ impl Chip {
             pc: Addr::Reset as _,
             rom: rom,
             mem: vec![],
+            running: true,
         }.real_run();
     }
 
     fn real_run(&mut self) {
         self.mem.resize(0x10000 - self.rom.offset as usize, 0);
         self.pc = self.rom.get16(self.pc);
-        for _ in 1..100 {
+        while self.running {
             let (width, opcode, mode) = decode(self.rom[self.pc]);
-            self.pc += 1;
+            let arg_pos = self.pc + 1;
+            self.pc += width as u16 + 1;
             let v = match width {
                 0 => 0,
-                1 => self.rom[self.pc] as u16,
-                2 => self.rom.get16(self.pc),
+                1 => self.rom[arg_pos] as u16,
+                2 => self.rom.get16(arg_pos),
                 _ => unreachable!(),
             };
             self.exec(opcode, mode, v);
-            self.pc += width as u16;
         }
     }
 
@@ -129,10 +130,11 @@ impl Chip {
                 Lda => { self.a = self.load(mode, arg) }
                 Ldx => { self.x = self.load(mode, arg) }
                 Ldy => { self.y = self.load(mode, arg) }
-                _ => {},
+                Jmp => { self.pc = arg },
+                _ => { eprintln!("unimplemented: {:x} {:x}", op, self.pc) },
             }
             Op::Special(op) => match unsafe { transmute(op) } {
-                Brk => { self.pc = self.rom.get16(Addr::Break as u16) }
+                Brk => { self.running = false },
                 Inx => {
                     let x = self.x.wrapping_add(1);
                     self.x = x;
@@ -143,7 +145,10 @@ impl Chip {
                     self.y = y;
                     self.update_zs(y);
                 }
-                _ => {}
+                Clc | Sec => self.set_flag(StatFlag::C, op & 0x20 != 0),
+                Cli | Sei => self.set_flag(StatFlag::I, op & 0x20 != 0),
+                Cld | Sed => self.set_flag(StatFlag::D, op & 0x20 != 0),
+                _ => unimplemented!(),
             }
         }
     }
@@ -209,17 +214,24 @@ impl Chip {
         }
     }
 
-    fn push8(&mut self, data: u8) {
+    fn pop(&mut self) -> u8 {
+        let ret = self.mem[0x100 + self.sp as usize];
+        self.sp += 1;
+        ret
+    }
+    fn pop16(&mut self) -> u16 {
+        self.pop() as u16 | (self.pop() as u16) << 8
+    }
+    fn push(&mut self, data: u8) {
         self.mem[0x100 + self.sp as usize] = data;
         self.sp -= 1;
         if self.sp == 0xff {
             eprintln!("Warning: stack overflow");
         }
     }
-
     fn push16(&mut self, data: u16) {
-        self.push8((data >> 8) as u8);
-        self.push8(data as u8);
+        self.push((data >> 8) as u8);
+        self.push(data as u8);
     }
 
     fn update_zs(&mut self, val: u8) {
@@ -254,7 +266,7 @@ fn decode(code: u8) -> (u8, Op, Amode) {
     // special codes
     if code & 0x9F == 0x0 ||
         code & 0x0f == 0x8 ||
-        code & 0x0f == 0xA && code & 0xf0 >= 0x80
+        code & 0x0f == 0xA && code >= 0x80
     {
         let (width, mode) = if code == SpecialOp::Jsr as u8 {
             (2, Abs)
