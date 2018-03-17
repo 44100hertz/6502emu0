@@ -6,9 +6,9 @@ STRING_PTR = $0
 text:
         .db 'hello, world', $0a, 0
 main:
-        lda #text & $ff
+        lda #<text
         sta STRING_PTR
-        lda #text >> 8
+        lda #>text
         sta STRING_PTR+1
         jsr print_string
 
