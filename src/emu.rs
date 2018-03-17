@@ -3,6 +3,7 @@ use std::mem::transmute;
 // Variable opcodes with middle (argument) bits ___XXX__ set to 0
 // http://www.llx.com/~nparker/a2/opcodes.html
 #[allow(dead_code)]
+#[repr(u8)]
 enum StandardOp {
     Ora = 0x01, Asl,
     Bit = 0x20, And, Rol,
@@ -15,6 +16,7 @@ enum StandardOp {
 }
 // Single-kinded opcodes best to list invidiually
 #[allow(dead_code)]
+#[repr(u8)]
 enum SpecialOp {
     // _8
     Php = 0x08, Plp = 0x28, Pha = 0x48, Pla = 0x68,
@@ -105,7 +107,7 @@ impl Chip {
         self.mem.resize(0x10000 - self.rom.offset as usize, 0);
         self.pc = self.rom.get16(self.pc);
         while self.running {
-//println!("pc: {:x}", self.pc);
+//println!("pc: {:x}, a: {:x}, x: {:x}, y: {:x}, status: {:x}", self.pc, self.a, self.x, self.y, self.status);
             let (width, opcode, mode) = decode(self.rom[self.pc]);
             let arg_pos = self.pc + 1;
             self.pc += width as u16 + 1;
@@ -125,7 +127,7 @@ impl Chip {
         use self::StandardOp::*;
         match code {
             Op::Branch(flag, cmp) => {
-                if (self.status & flag as u8 == 0) == cmp {
+                if self.get_flag(flag) == cmp {
                     self.pc = (self.pc as i16 + (arg as i8) as i16) as u16;
                 }
             }
@@ -149,9 +151,12 @@ impl Chip {
                     self.y = y;
                     self.update_zs(y);
                 }
-                Clc | Sec => self.set_flag(StatFlag::C, op & 0x20 != 0),
-                Cli | Sei => self.set_flag(StatFlag::I, op & 0x20 != 0),
-                Cld | Sed => self.set_flag(StatFlag::D, op & 0x20 != 0),
+                Clc => self.set_flag(StatFlag::C, false),
+                Sec => self.set_flag(StatFlag::C, true),
+                Cli => self.set_flag(StatFlag::I, false),
+                Sei => self.set_flag(StatFlag::I, true),
+                Cld => self.set_flag(StatFlag::D, false),
+                Sed => self.set_flag(StatFlag::D, true),
                 Jsr => {
                     let pc = self.pc - 1;
                     self.push16(pc);
@@ -260,6 +265,9 @@ impl Chip {
         self.set_flag(StatFlag::S, val & 0x80 != 0);
     }
 
+    fn get_flag(&mut self, flag: StatFlag) -> bool {
+        self.status & flag as u8 != 0
+    }
     fn set_flag(&mut self, flag: StatFlag, value: bool) {
         let bit = if value { flag as u8 } else { 0 };
         self.status = self.status & (0xff ^ flag as u8) | bit;
@@ -279,7 +287,7 @@ fn decode(code: u8) -> (u8, Op, Amode) {
                 3 => StatFlag::Z,
                 _ => unreachable!(),
             },
-            code >> 5 & 1 == 0, // true means test against 0
+            code >> 5 & 1 != 0, // true means test against 0
         );
         return (1, op, Rela);
     }
