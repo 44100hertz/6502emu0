@@ -27,16 +27,19 @@ enum SpecialOp {
     // Others
     Brk = 0x00, Jsr = 0x20, Rti = 0x40, Rts = 0x60,
 }
+#[derive(Debug, Copy, Clone)]
 enum Op {
     Special(u8),
     Standard(u8),
     Branch(StatFlag, bool),
 }
+#[derive(Debug, Copy, Clone)]
 enum Amode {
     Nothing, Accum, Rela, Immed,
     Zp, Zpx, Zpy, Idrx, Idry, Abs, Absx, Absy, Error,
 }
-enum Addr {
+#[allow(dead_code)]
+pub enum Addr {
     Reset = 0xfffa,
     NMI   = 0xfffc,
     Break = 0xfffe,
@@ -48,7 +51,6 @@ pub struct Rom {
 impl ::std::ops::Index<u16> for Rom {
     type Output = u8;
     fn index(&self, index: u16) -> &u8 {
-        assert!(index >= self.offset, "Index out of range");
         &self.rom[(index - self.offset) as usize]
     }
 }
@@ -103,6 +105,7 @@ impl Chip {
         self.mem.resize(0x10000 - self.rom.offset as usize, 0);
         self.pc = self.rom.get16(self.pc);
         while self.running {
+//println!("pc: {:x}", self.pc);
             let (width, opcode, mode) = decode(self.rom[self.pc]);
             let arg_pos = self.pc + 1;
             self.pc += width as u16 + 1;
@@ -117,6 +120,7 @@ impl Chip {
     }
 
     fn exec(&mut self, code: Op, mode: Amode, arg: u16) {
+//println!("exec: {:?} {:?} {:x}", code, mode, arg);
         use self::SpecialOp::*;
         use self::StandardOp::*;
         match code {
@@ -131,7 +135,7 @@ impl Chip {
                 Ldx => { self.x = self.load(mode, arg) }
                 Ldy => { self.y = self.load(mode, arg) }
                 Jmp => { self.pc = arg },
-                _ => { eprintln!("unimplemented: {:x} {:x}", op, self.pc) },
+                _ => { eprintln!("unimplemented op: {:x} {:x}", op, self.pc) },
             }
             Op::Special(op) => match unsafe { transmute(op) } {
                 Brk => { self.running = false },
@@ -148,6 +152,14 @@ impl Chip {
                 Clc | Sec => self.set_flag(StatFlag::C, op & 0x20 != 0),
                 Cli | Sei => self.set_flag(StatFlag::I, op & 0x20 != 0),
                 Cld | Sed => self.set_flag(StatFlag::D, op & 0x20 != 0),
+                Jsr => {
+                    let pc = self.pc - 1;
+                    self.push16(pc);
+                    self.pc = arg;
+                }
+                Rts => {
+                    self.pc = self.pop16() + 1;
+                }
                 _ => unimplemented!(),
             }
         }
@@ -155,7 +167,6 @@ impl Chip {
 
     fn get_addr(&mut self, mode: Amode, pos: u16) -> u16 {
         use self::Amode::*;
-        //        println!("load: {:?} at {:x}", mode, pos);
         match mode {
             Zp | Abs => pos,
             Zpx => pos << 8 | self.x as u16,
@@ -165,11 +176,12 @@ impl Chip {
             Idrx => {
                 let pos = pos + self.x as u16;
                 self.read_mem(pos) as u16 |
-                (self.read_mem(pos+1) as u16) << 8
+                ((self.read_mem(pos+1) as u16) << 8)
             },
             Idry => {
-                self.read_mem(pos).wrapping_add(self.x) as u16 |
-                (self.read_mem(pos+1) as u16) << 8
+                let offset = self.read_mem(pos) as u16 | (self.read_mem(pos+1) as u16) << 8;
+//println!("indirect offset: {:x}", offset);
+                offset.wrapping_add(self.y as u16)
             },
             Accum | Immed | Nothing | Rela => unreachable!(),
             Error => panic!("Invalid opcode"),
@@ -184,11 +196,13 @@ impl Chip {
                 self.read_mem(addr)
             }
         };
+//println!("load: {:x} from {:?} at {:x}", ret, mode, pos);
         self.update_zs(ret);
         ret
     }
 
     fn store(&mut self, mode: Amode, pos: u16, v: u8) {
+//println!("store: {:x} into {:?} at {:x}", v, mode, pos);
         match mode {
             Amode::Immed => panic!("Attempt to store immediate"),
             Amode::Accum => self.a = v,
@@ -200,6 +214,7 @@ impl Chip {
     }
 
     fn read_mem(&self, pos: u16) -> u8 {
+//println!("read memory at: {:x}", pos);
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos],
             _ => self.mem[pos as usize],
@@ -207,6 +222,7 @@ impl Chip {
     }
 
     fn write_mem(&mut self, pos: u16, v: u8) {
+//println!("write memory at: {:x}", pos);
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos] = v,
             0x6000 => print!("{}", v as char),
@@ -215,18 +231,23 @@ impl Chip {
     }
 
     fn pop(&mut self) -> u8 {
+        self.sp = self.sp.wrapping_add(1);
         let ret = self.mem[0x100 + self.sp as usize];
-        self.sp += 1;
+//println!("pop: {:x} at sp = {:x}", ret, self.sp);
+        if self.sp == 0x00 {
+            eprintln!("stack underflow");
+        }
         ret
     }
     fn pop16(&mut self) -> u16 {
         self.pop() as u16 | (self.pop() as u16) << 8
     }
     fn push(&mut self, data: u8) {
+//println!("push: {:x} at sp = {:x}", data, self.sp);
         self.mem[0x100 + self.sp as usize] = data;
-        self.sp -= 1;
+        self.sp = self.sp.wrapping_sub(1);
         if self.sp == 0xff {
-            eprintln!("Warning: stack overflow");
+            eprintln!("stack overflow");
         }
     }
     fn push16(&mut self, data: u16) {
