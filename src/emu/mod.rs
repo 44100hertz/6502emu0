@@ -1,3 +1,6 @@
+mod decode;
+use self::decode::decode;
+
 use std::mem::transmute;
 
 // Variable opcodes with middle (argument) bits ___XXX__ set to 0
@@ -30,13 +33,13 @@ enum SpecialOp {
     Brk = 0x00, Jsr = 0x20, Rti = 0x40, Rts = 0x60,
 }
 #[derive(Debug, Copy, Clone)]
-enum Op {
+pub enum Op {
     Special(u8),
     Standard(u8),
     Branch(StatFlag, bool),
 }
 #[derive(Debug, Copy, Clone)]
-enum Amode {
+pub enum Amode {
     Nothing, Accum, Rela, Immed,
     Zp, Zpx, Zpy, Idrx, Idry, Abs, Absx, Absy, Error,
 }
@@ -76,10 +79,9 @@ pub struct Chip {
     status: u8,
     rom: Rom,
     mem: Vec<u8>,
-    running: bool,
 }
 #[derive(Copy, Clone, Debug)]
-enum StatFlag {
+pub enum StatFlag {
     C = 1 << 0,
     Z = 1 << 1,
     I = 1 << 2,
@@ -99,14 +101,13 @@ impl Chip {
             pc: Addr::Reset as _,
             rom: rom,
             mem: vec![],
-            running: true,
         }.real_run();
     }
 
     fn real_run(&mut self) {
         self.mem.resize(0x10000 - self.rom.offset as usize, 0);
         self.pc = self.rom.get16(self.pc);
-        while self.running {
+        while !self.get_flag(StatFlag::B) {
 //println!("pc: {:x}, a: {:x}, x: {:x}, y: {:x}, status: {:x}", self.pc, self.a, self.x, self.y, self.status);
             let (width, opcode, mode) = decode(self.rom[self.pc]);
             let arg_pos = self.pc + 1;
@@ -190,7 +191,7 @@ impl Chip {
             }
             Op::Special(op) => match unsafe { transmute(op) } {
                 // control flow
-                Brk => self.running = false,
+                Brk => self.set_flag(StatFlag::B, true),
                 Jsr => {
                     let pc = self.pc - 1;
                     self.push16(pc);
@@ -327,74 +328,4 @@ impl Chip {
         let bit = if value { flag as u8 } else { 0 };
         self.status = self.status & (0xff ^ flag as u8) | bit;
     }
-}
-
-fn decode(code: u8) -> (u8, Op, Amode) {
-    use self::Amode::*;
-
-    // branch codes
-    if code & 0x1f == 0x10 {
-        let op = Op::Branch(
-            match code >> 6 & 0x3 {
-                0 => StatFlag::S,
-                1 => StatFlag::V,
-                2 => StatFlag::C,
-                3 => StatFlag::Z,
-                _ => unreachable!(),
-            },
-            code >> 5 & 1 != 0, // true means test against 0
-        );
-        return (1, op, Rela);
-    }
-
-    // special codes
-    if code & 0x9F == 0x0 ||
-        code & 0x0f == 0x8 ||
-        code & 0x0f == 0xA && code >= 0x80
-    {
-        let (width, mode) = if code == SpecialOp::Jsr as u8 {
-            (2, Abs)
-        } else {
-            (0, Nothing)
-        };
-        return (width, Op::Special(code), mode);
-    }
-
-    // standard (variable) codes
-    let op = code & 0b11100011;
-    let addr_bits = code >> 2 & 7;
-    let code_bits = code & 3;
-
-    let (width, mode) = match addr_bits {
-        0 => match code_bits {
-            1 => (1, Idrx),
-            _ => (1, Immed),
-        }
-        1 => (1, Zp),
-        2 => match code_bits {
-            1 => (1, Immed),
-            2 => (0, Accum),
-            _ => (0, Error),
-        }
-        3 => (2, Abs),
-        4 => match code_bits {
-            1 => (1, Idry),
-            _ => (0, Error),
-        }
-        5 => match unsafe { transmute(op) } {
-            StandardOp::Stx | StandardOp::Ldx => (1, Zpy),
-            _ => (1, Zpx),
-        }
-        6 => match code_bits {
-            1 => (2, Absy),
-            _ => (0, Error),
-        }
-        7 => match unsafe { transmute(op) } {
-            StandardOp::Ldx => (2, Absy),
-            _ => (2, Absx),
-        }
-        _ => unreachable!(),
-    };
-
-    (width, self::Op::Standard(op), mode)
 }
