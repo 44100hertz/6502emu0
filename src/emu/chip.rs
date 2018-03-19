@@ -58,9 +58,9 @@ impl Chip {
             let v = $e;
             self.store(mode, arg, v)
         }}}
-        macro_rules! update_zs{($e:expr) => {{
+        macro_rules! update_flags{($e:expr) => {{
             let v = $e;
-            self.update_zs(v)
+            self.update_flags(v)
         }}}
         macro_rules! push{($e:expr) => {{
             let v = $e;
@@ -73,7 +73,23 @@ impl Chip {
         }}}
         macro_rules! inc{($param:expr, $offset:expr) => {{
             $param = $param.wrapping_add($offset);
-            update_zs!($param);
+            update_flags!($param);
+        }}}
+        macro_rules! transfer{($src:expr, $dest:expr) => {{
+            $dest = $src;
+            update_flags!($dest);
+        }}}
+        macro_rules! add{($param:expr) => {{
+            let val = $param as u16;
+            let sum = val + self.a as u16 +
+                if self.get_flag(StatFlag::C) {1} else {0};
+            self.set_flag(StatFlag::C, sum > 0xff);
+            let a = self.a;
+            self.set_flag(StatFlag::V,
+                          val as u8 & 0x80 == a & 0x80 &&
+                          val & 0x80 != sum & 0x80);
+            self.a = sum as u8;
+            self.update_flags(a);
         }}}
         match code {
             Op::Branch(flag, cmp) => {
@@ -92,13 +108,22 @@ impl Chip {
                 // read modify write
                 Dec => store!(load!().wrapping_sub(1)),
                 Inc => store!(load!().wrapping_add(1)),
-                Lsr => unimplemented!(),
-                Asl => unimplemented!(),
-                Ror => unimplemented!(),
-                Rol => unimplemented!(),
+                Lsr => store!(load!().wrapping_shr(1)),
+                Asl => store!(load!().wrapping_shl(1) |
+                              if self.get_flag(StatFlag::C) {1} else {0}),
+                Ror => {
+                    let (val, carry) = load!().overflowing_shr(1);
+                    store!(val | if self.get_flag(StatFlag::C) {0x80} else {0});
+                    self.set_flag(StatFlag::C, carry);
+                }
+                Rol => {
+                    let (val, carry) = load!().overflowing_shl(1);
+                    store!(val | if self.get_flag(StatFlag::C) {1} else {0});
+                    self.set_flag(StatFlag::C, carry);
+                }
                 // other arithmetic
-                Adc => unimplemented!(),
-                Sbc => unimplemented!(),
+                Adc => add!(load!()),
+                Sbc => add!(load!() ^ 0xff),
                 Ora => self.a |= load!(),
                 And => self.a &= load!(),
                 Eor => self.a ^= load!(),
@@ -127,12 +152,12 @@ impl Chip {
                 Dex => inc!(self.x, 255),
                 Dey => inc!(self.y, 255),
                 // misc
-                Txa => self.a = self.x,
-                Tax => self.x = self.a,
-                Tya => self.a = self.y,
-                Tay => self.y = self.a,
+                Txa => transfer!(self.x, self.a),
+                Tax => transfer!(self.a, self.x),
+                Tya => transfer!(self.y, self.a),
+                Tay => transfer!(self.a, self.y),
                 Txs => self.sp = self.x,
-                Tsx => self.x = self.sp,
+                Tsx => transfer!(self.sp, self.x),
                 Clc => self.set_flag(StatFlag::C, false),
                 Sec => self.set_flag(StatFlag::C, true),
                 Cli => self.set_flag(StatFlag::I, false),
@@ -145,6 +170,33 @@ impl Chip {
                 Pha => push!(self.a),
                 Pla => self.a = self.pop(),
                 Nop => {},
+            }
+        }
+    }
+
+
+    fn load(&mut self, mode: Amode, pos: u16) -> u8 {
+        let ret = match mode {
+            Amode::Immed => pos as u8,
+            Amode::Accum => self.a,
+            _ => {
+                let addr = self.get_addr(mode, pos);
+                self.read_mem(addr)
+            }
+        };
+        //println!("load: {:x} from {:?} at {:x}", ret, mode, pos);
+        self.update_flags(ret);
+        ret
+    }
+
+    fn store(&mut self, mode: Amode, pos: u16, v: u8) {
+        //println!("store: {:x} into {:?} at {:x}", v, mode, pos);
+        match mode {
+            Amode::Immed => panic!("Attempt to store immediate"),
+            Amode::Accum => self.a = v,
+            _ => {
+                let addr = self.get_addr(mode, pos);
+                self.write_mem(addr, v);
             }
         }
     }
@@ -169,31 +221,6 @@ impl Chip {
             },
             Accum | Immed | Nothing | Rela => unreachable!(),
             Error => panic!("Invalid opcode"),
-        }
-    }
-    fn load(&mut self, mode: Amode, pos: u16) -> u8 {
-        let ret = match mode {
-            Amode::Immed => pos as u8,
-            Amode::Accum => self.a,
-            _ => {
-                let addr = self.get_addr(mode, pos);
-                self.read_mem(addr)
-            }
-        };
-        //println!("load: {:x} from {:?} at {:x}", ret, mode, pos);
-        self.update_zs(ret);
-        ret
-    }
-
-    fn store(&mut self, mode: Amode, pos: u16, v: u8) {
-        //println!("store: {:x} into {:?} at {:x}", v, mode, pos);
-        match mode {
-            Amode::Immed => panic!("Attempt to store immediate"),
-            Amode::Accum => self.a = v,
-            _ => {
-                let addr = self.get_addr(mode, pos);
-                self.write_mem(addr, v);
-            }
         }
     }
 
@@ -239,11 +266,10 @@ impl Chip {
         self.push(data as u8);
     }
 
-    fn update_zs(&mut self, val: u8) {
+    fn update_flags(&mut self, val: u8) {
         self.set_flag(StatFlag::Z, val == 0);
         self.set_flag(StatFlag::S, val & 0x80 != 0);
     }
-
     fn get_flag(&mut self, flag: StatFlag) -> bool {
         self.status & flag as u8 != 0
     }
