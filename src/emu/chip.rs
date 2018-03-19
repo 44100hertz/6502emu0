@@ -31,7 +31,7 @@ impl Chip {
         self.mem.resize(0x10000 - self.rom.offset as usize, 0);
         self.pc = self.rom.get16(self.pc);
         while !self.get_flag(StatFlag::B) {
-//println!("pc: {:x}, a: {:x}, x: {:x}, y: {:x}, status: {:x}", self.pc, self.a, self.x, self.y, self.status);
+            //println!("pc: {:x}, a: {:x}, x: {:x}, y: {:x}, status: {:x}", self.pc, self.a, self.x, self.y, self.status);
             let (width, opcode, mode) = decode(self.rom[self.pc]);
             let arg_pos = self.pc + 1;
             self.pc += width as u16 + 1;
@@ -46,7 +46,7 @@ impl Chip {
     }
 
     fn exec(&mut self, code: Op, mode: Amode, arg: u16) {
-//println!("exec: {:?} {:?} {:x}", code, mode, arg);
+        //println!("exec: {:?} {:?} {:x}", code, mode, arg);
         use super::SpecialOp::*;
         use super::StandardOp::*;
 
@@ -164,7 +164,7 @@ impl Chip {
             },
             Idry => {
                 let offset = self.read_mem(pos) as u16 | (self.read_mem(pos+1) as u16) << 8;
-//println!("indirect offset: {:x}", offset);
+                //println!("indirect offset: {:x}", offset);
                 offset.wrapping_add(self.y as u16)
             },
             Accum | Immed | Nothing | Rela => unreachable!(),
@@ -180,13 +180,13 @@ impl Chip {
                 self.read_mem(addr)
             }
         };
-//println!("load: {:x} from {:?} at {:x}", ret, mode, pos);
+        //println!("load: {:x} from {:?} at {:x}", ret, mode, pos);
         self.update_zs(ret);
         ret
     }
 
     fn store(&mut self, mode: Amode, pos: u16, v: u8) {
-//println!("store: {:x} into {:?} at {:x}", v, mode, pos);
+        //println!("store: {:x} into {:?} at {:x}", v, mode, pos);
         match mode {
             Amode::Immed => panic!("Attempt to store immediate"),
             Amode::Accum => self.a = v,
@@ -198,7 +198,7 @@ impl Chip {
     }
 
     fn read_mem(&self, pos: u16) -> u8 {
-//println!("read memory at: {:x}", pos);
+        //println!("read memory at: {:x}", pos);
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos],
             _ => self.mem[pos as usize],
@@ -206,7 +206,7 @@ impl Chip {
     }
 
     fn write_mem(&mut self, pos: u16, v: u8) {
-//println!("write memory at: {:x}", pos)
+        //println!("write memory at: {:x}", pos)
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos] = v,
             0x6000 => print!("{}", v as char),
@@ -217,7 +217,7 @@ impl Chip {
     fn pop(&mut self) -> u8 {
         self.sp = self.sp.wrapping_add(1);
         let ret = self.mem[0x100 + self.sp as usize];
-//println!("pop: {:x} at sp = {:x}", ret, self.sp);
+        //println!("pop: {:x} at sp = {:x}", ret, self.sp);
         if self.sp == 0x00 {
             eprintln!("stack underflow");
         }
@@ -227,7 +227,7 @@ impl Chip {
         self.pop() as u16 | (self.pop() as u16) << 8
     }
     fn push(&mut self, data: u8) {
-//println!("push: {:x} at sp = {:x}", data, self.sp);
+        //println!("push: {:x} at sp = {:x}", data, self.sp);
         self.mem[0x100 + self.sp as usize] = data;
         self.sp = self.sp.wrapping_sub(1);
         if self.sp == 0xff {
