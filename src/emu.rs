@@ -125,6 +125,32 @@ impl Chip {
 //println!("exec: {:?} {:?} {:x}", code, mode, arg);
         use self::SpecialOp::*;
         use self::StandardOp::*;
+
+        macro_rules! load{() => {{
+            let tmp = self.load(mode, arg);
+            tmp
+        }}}
+        macro_rules! store{($e:expr) => {{
+            let v = $e;
+            self.store(mode, arg, v)
+        }}}
+        macro_rules! update_zs{($e:expr) => {{
+            let v = $e;
+            self.update_zs(v)
+        }}}
+        macro_rules! push{($e:expr) => {{
+            let v = $e;
+            self.push(v)
+        }}}
+        macro_rules! cmp{($e:expr) => {{
+            let v = $e;
+            let loaded = load!();
+            self.set_flag(StatFlag::Z, v == loaded);
+        }}}
+        macro_rules! inc{($param:expr, $offset:expr) => {{
+            $param = $param.wrapping_add($offset);
+            update_zs!($param);
+        }}}
         match code {
             Op::Branch(flag, cmp) => {
                 if self.get_flag(flag) == cmp {
@@ -132,40 +158,69 @@ impl Chip {
                 }
             }
             Op::Standard(op) => match unsafe { transmute(op) } {
-                Sta => { let a = self.a; self.store(mode, arg, a) }
-                Lda => { self.a = self.load(mode, arg) }
-                Ldx => { self.x = self.load(mode, arg) }
-                Ldy => { self.y = self.load(mode, arg) }
-                Jmp => { self.pc = arg },
-                _ => { eprintln!("unimplemented op: {:x} {:x}", op, self.pc) },
+                // load/store
+                Lda => self.a = load!(),
+                Ldx => self.x = load!(),
+                Ldy => self.y = load!(),
+                Sta => store!(self.a),
+                Stx => store!(self.x),
+                Sty => store!(self.y),
+                // read modify write
+                Dec => store!(load!().wrapping_sub(1)),
+                Inc => store!(load!().wrapping_add(1)),
+                Lsr => unimplemented!(),
+                Asl => unimplemented!(),
+                Ror => unimplemented!(),
+                Rol => unimplemented!(),
+                // other arithmetic
+                Adc => unimplemented!(),
+                Sbc => unimplemented!(),
+                Ora => self.a |= load!(),
+                And => self.a &= load!(),
+                Eor => self.a ^= load!(),
+                // control flow
+                Jmp => self.pc = arg,
+                Jma => self.pc = self.read_mem(arg) as u16 |
+                (self.read_mem((arg + 1) & 0xff) as u16 >> 8),
+                Cmp => cmp!(self.a),
+                Cpx => cmp!(self.x),
+                Cpy => cmp!(self.y),
+                // misc
+                Bit => { load!(); },
             }
             Op::Special(op) => match unsafe { transmute(op) } {
-                Brk => { self.running = false },
-                Inx => {
-                    let x = self.x.wrapping_add(1);
-                    self.x = x;
-                    self.update_zs(x);
+                // control flow
+                Brk => self.running = false,
+                Jsr => {
+                    let pc = self.pc - 1;
+                    self.push16(pc);
+                    self.pc = arg;
                 }
-                Iny => {
-                    let y = self.y.wrapping_add(1);
-                    self.y = y;
-                    self.update_zs(y);
-                }
+                Rts => self.pc = self.pop16() + 1,
+                Rti => {self.status = self.pop(); self.pc = self.pop16()},
+                Inx => inc!(self.x, 1),
+                Iny => inc!(self.y, 1),
+                Dex => inc!(self.x, 255),
+                Dey => inc!(self.y, 255),
+                // misc
+                Txa => self.a = self.x,
+                Tax => self.x = self.a,
+                Tya => self.a = self.y,
+                Tay => self.y = self.a,
+                Txs => self.sp = self.x,
+                Tsx => self.x = self.sp,
                 Clc => self.set_flag(StatFlag::C, false),
                 Sec => self.set_flag(StatFlag::C, true),
                 Cli => self.set_flag(StatFlag::I, false),
                 Sei => self.set_flag(StatFlag::I, true),
                 Cld => self.set_flag(StatFlag::D, false),
                 Sed => self.set_flag(StatFlag::D, true),
-                Jsr => {
-                    let pc = self.pc - 1;
-                    self.push16(pc);
-                    self.pc = arg;
-                }
-                Rts => {
-                    self.pc = self.pop16() + 1;
-                }
-                _ => unimplemented!(),
+                Clv => self.set_flag(StatFlag::V, false),
+                Php => push!(self.status),
+                Plp => self.status = self.pop(),
+                Pha => push!(self.a),
+                Pla => self.a = self.pop(),
+                Nop => {},
             }
         }
     }
@@ -227,7 +282,7 @@ impl Chip {
     }
 
     fn write_mem(&mut self, pos: u16, v: u8) {
-//println!("write memory at: {:x}", pos);
+//println!("write memory at: {:x}", pos)
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos] = v,
             0x6000 => print!("{}", v as char),
