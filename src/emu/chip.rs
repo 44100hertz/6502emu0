@@ -240,7 +240,7 @@ impl Chip {
         //println!("read memory at: {:x}", pos);
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos],
-            IO_REG => {
+            reg::IO => {
                 use std::io::{Read, stdin};
                 let mut tmp = [0u8; 1];
                 stdin().read(&mut tmp).expect("failed to read stdin");
@@ -254,7 +254,7 @@ impl Chip {
         //println!("write memory at: {:x}", pos)
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos] = v,
-            IO_REG => print!("{}", v as char),
+            reg::IO => print!("{}", v as char),
             _ => self.mem[pos as usize] = v,
         }
     }
