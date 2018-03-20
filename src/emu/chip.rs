@@ -1,3 +1,9 @@
+// Here the "chip" is just the execution part of the processor.
+// Bugs:
+// - arithmetic has not been tested
+// - missing undocumented (cc = 11) simultanious instructions
+// - RMW instructions do not write memory twice like the real thing (WONTFIX)
+
 use super::{Addr, Amode, StatFlag, Op, Rom};
 use super::decode::decode;
 
