@@ -3,6 +3,12 @@ use super::decode::decode;
 
 use std::mem::transmute;
 
+mod reg {
+    // read: get an 8-bit char
+    // write: write an 8-bit char
+    pub const IO: u16 = 0x6000;
+}
+
 pub struct Chip {
     a: u8,
     x: u8,
@@ -228,6 +234,12 @@ impl Chip {
         //println!("read memory at: {:x}", pos);
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos],
+            IO_REG => {
+                use std::io::{Read, stdin};
+                let mut tmp = [0u8; 1];
+                stdin().read(&mut tmp).expect("failed to read stdin");
+                tmp[0]
+            }
             _ => self.mem[pos as usize],
         }
     }
@@ -236,7 +248,7 @@ impl Chip {
         //println!("write memory at: {:x}", pos)
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos] = v,
-            0x6000 => print!("{}", v as char),
+            IO_REG => print!("{}", v as char),
             _ => self.mem[pos as usize] = v,
         }
     }
