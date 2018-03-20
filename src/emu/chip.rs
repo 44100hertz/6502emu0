@@ -12,7 +12,9 @@ use std::mem::transmute;
 mod reg {
     // read: get an 8-bit char
     // write: write an 8-bit char
-    pub const IO: u16 = 0x6000;
+    pub const IO: u16     = 0x6000;
+    pub const PUTNUM: u16 = 0x6001;
+    pub const PUTDEC: u16 = 0x6002;
 }
 
 pub struct Chip {
@@ -255,6 +257,8 @@ impl Chip {
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos] = v,
             reg::IO => print!("{}", v as char),
+            reg::PUTNUM => print!("{:02x} ", v),
+            reg::PUTDEC => print!("{:03} ", v),
             _ => self.mem[pos as usize] = v,
         }
     }
