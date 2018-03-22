@@ -2,6 +2,7 @@ mod decode;
 mod chip;
 
 pub fn run(rom: Rom) {
+    assert!(rom.rom.len() <= 0x8000, "exceeded maximum ROM size");
     chip::Chip::new(rom).run();
 }
 
