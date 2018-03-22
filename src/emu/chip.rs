@@ -10,11 +10,10 @@ use super::decode::decode;
 use std::mem::transmute;
 
 mod reg {
-    // read: get an 8-bit char
-    // write: write an 8-bit char
-    pub const IO: u16     = 0x6000;
-    pub const PUTNUM: u16 = 0x6001;
-    pub const PUTDEC: u16 = 0x6002;
+    pub const IO: u16      = 0x6000; // read: get char; write: put char
+    pub const PUTNUM: u16  = 0x6001; // writes hex value
+    pub const PUTDEC: u16  = 0x6002; // writes decimal value
+    pub const PUTPAGE: u16 = 0x6003; // writes a 256 byte mem region
 }
 
 pub struct Chip {
@@ -45,7 +44,8 @@ impl Chip {
         self.mem.resize(0x10000 - self.rom.offset as usize, 0);
         self.pc = self.rom.get16(self.pc);
         while !self.get_flag(StatFlag::B) {
-            //println!("pc: {:x}, a: {:x}, x: {:x}, y: {:x}, status: {:x}", self.pc, self.a, self.x, self.y, self.status);
+            println!("pc   a  x  y  SV_BDIZC");
+            println!("{:02x} {:02x} {:02x} {:02x} {:08b}", self.pc, self.a, self.x, self.y, self.status);
             let (width, opcode, mode) = decode(self.rom[self.pc]);
             let arg_pos = self.pc + 1;
             self.pc += width as u16 + 1;
@@ -60,7 +60,6 @@ impl Chip {
     }
 
     fn exec(&mut self, code: Op, mode: Amode, arg: u16) {
-        //println!("exec: {:?} {:?} {:x}", code, mode, arg);
         use super::SpecialOp::*;
         use super::StandardOp::*;
 
@@ -70,7 +69,8 @@ impl Chip {
         }}}
         macro_rules! store{($e:expr) => {{
             let v = $e;
-            self.store(mode, arg, v)
+            self.store(mode, arg, v);
+            v
         }}}
         macro_rules! update_flags{($e:expr) => {{
             let v = $e;
@@ -103,8 +103,9 @@ impl Chip {
                           val as u8 & 0x80 == a & 0x80 &&
                           val & 0x80 != sum & 0x80);
             self.a = sum as u8;
-            self.update_flags(a);
+            update_flags!(self.a);
         }}}
+        //println!("exec: {:?} {:?} {:x}", code, mode, arg);
         match code {
             Op::Branch(flag, cmp) => {
                 if self.get_flag(flag) == cmp {
@@ -116,31 +117,35 @@ impl Chip {
                 Lda => self.a = load!(),
                 Ldx => self.x = load!(),
                 Ldy => self.y = load!(),
-                Sta => store!(self.a),
-                Stx => store!(self.x),
-                Sty => store!(self.y),
+                Sta => { store!(self.a); },
+                Stx => { store!(self.x); },
+                Sty => { store!(self.y); },
                 // read modify write
-                Dec => store!(load!().wrapping_sub(1)),
-                Inc => store!(load!().wrapping_add(1)),
-                Lsr => store!(load!().wrapping_shr(1)),
-                Asl => store!(load!().wrapping_shl(1) |
-                              if self.get_flag(StatFlag::C) {1} else {0}),
+                Inc => update_flags!(store!(load!().wrapping_add(1))),
+                Dec => update_flags!(store!(load!().wrapping_sub(1))),
+                Lsr => update_flags!(store!(load!().wrapping_shl(1))),
+                Asl => update_flags!(
+                    store!(load!().wrapping_sub(1) |
+                           if self.get_flag(StatFlag::C) {1} else {0})
+                ),
                 Ror => {
                     let (val, carry) = load!().overflowing_shr(1);
                     store!(val | if self.get_flag(StatFlag::C) {0x80} else {0});
+                    update_flags!(val);
                     self.set_flag(StatFlag::C, carry);
                 }
                 Rol => {
                     let (val, carry) = load!().overflowing_shl(1);
                     store!(val | if self.get_flag(StatFlag::C) {1} else {0});
+                    update_flags!(val);
                     self.set_flag(StatFlag::C, carry);
                 }
                 // other arithmetic
                 Adc => add!(load!()),
                 Sbc => add!(load!() ^ 0xff),
-                Ora => self.a |= load!(),
-                And => self.a &= load!(),
-                Eor => self.a ^= load!(),
+                Ora => { self.a |= load!(); update_flags!(self.a) },
+                And => { self.a &= load!(); update_flags!(self.a) },
+                Eor => { self.a ^= load!(); update_flags!(self.a) },
                 // control flow
                 Jmp => self.pc = arg,
                 Jma => self.pc = self.read_mem(arg) as u16 |
@@ -251,14 +256,24 @@ impl Chip {
             _ => self.mem[pos as usize],
         }
     }
-
     fn write_mem(&mut self, pos: u16, v: u8) {
         //println!("write memory at: {:x}", pos)
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos] = v,
             reg::IO => print!("{}", v as char),
-            reg::PUTNUM => print!("{:02x} ", v),
-            reg::PUTDEC => print!("{:03} ", v),
+            reg::PUTNUM => println!("{:02x} ", v),
+            reg::PUTDEC => println!("{:03} ", v),
+            reg::PUTPAGE => {
+                print!("     ");
+                for i in 0..32 { print!("{:02x}", i); }
+                println!();
+                for i in 0u16..256 {
+                    let offset = i + v as u16 * 256;
+                    if i % 32 == 0 { print!("{:04x} ", offset); }
+                    print!("{:02x}", self.read_mem(offset));
+                    if i % 32 == 31 { println!(); }
+                }
+            }
             _ => self.mem[pos as usize] = v,
         }
     }
@@ -290,7 +305,7 @@ impl Chip {
 
     fn update_flags(&mut self, val: u8) {
         self.set_flag(StatFlag::Z, val == 0);
-        self.set_flag(StatFlag::S, val & 0x80 != 0);
+        self.set_flag(StatFlag::S, (val as i8) < 0);
     }
     fn get_flag(&mut self, flag: StatFlag) -> bool {
         self.status & flag as u8 != 0
