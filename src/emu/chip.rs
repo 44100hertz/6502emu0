@@ -105,6 +105,17 @@ impl Chip {
             self.a = sum as u8;
             update_flags!(self.a);
         }}}
+        macro_rules! shift{($rotation:expr, $is_left:expr) => {{
+            let input = load!();
+            let (shifted, in_bit, out_bit) = match $is_left {
+                true =>  (input << 1, 1, 0x80),
+                false => (input >> 1, 0x80, 1),
+            };
+            let carry_in = $rotation && self.get_flag(StatFlag::C);
+            let output = shifted | if carry_in {in_bit} else {0};
+            self.set_flag(StatFlag::C, input & out_bit != 0);
+            update_flags!(store!(output));
+        }}}
         //println!("exec: {:?} {:?} {:x}", code, mode, arg);
         match code {
             Op::Branch(flag, cmp) => {
@@ -123,32 +134,10 @@ impl Chip {
                 // read modify write
                 Inc => update_flags!(store!(load!().wrapping_add(1))),
                 Dec => update_flags!(store!(load!().wrapping_sub(1))),
-                Lsr => {
-                    let input = load!();
-                    self.set_flag(StatFlag::C, input & 1 != 0);
-                    update_flags!(input >> 1);
-                }
-                Asl => {
-                    let input = load!();
-                    self.set_flag(StatFlag::C, input & 0x80 != 0);
-                    update_flags!(input << 1);
-                }
-                Ror => {
-                    let input = load!();
-                    let carry_in = if self.get_flag(StatFlag::C) {0x80} else {0};
-                    let output = input >> 1 | carry_in;
-                    let carry_out = input & 1 != 0;
-                    update_flags!(store!(output));
-                    self.set_flag(StatFlag::C, carry_out);
-                }
-                Rol => {
-                    let input = load!();
-                    let carry_in = if self.get_flag(StatFlag::C) {1} else {0};
-                    let output = input << 1 | carry_in;
-                    let carry_out = input & 0x80 != 0;
-                    update_flags!(store!(output));
-                    self.set_flag(StatFlag::C, carry_out);
-                }
+                Lsr => shift!(false, false),
+                Asl => shift!(false, true),
+                Ror => shift!(true,  false),
+                Rol => shift!(true,  true),
                 // other arithmetic
                 Adc => add!(load!()),
                 Sbc => add!(load!() ^ 0xff),
