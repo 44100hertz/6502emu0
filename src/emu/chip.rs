@@ -273,14 +273,15 @@ impl Chip {
             reg::PUTNUM => println!("{:02x} ", v),
             reg::PUTDEC => println!("{:03} ", v),
             reg::PUTPAGE => {
+                const PAGE_W: u16 = 32;
                 print!("     ");
-                for i in 0..32 { print!("{:02x}", i); }
+                for i in 0..PAGE_W { print!("{:02x}", i); }
                 println!();
-                for i in 0u16..256 {
+                for i in 0..256 {
                     let offset = i + v as u16 * 256;
-                    if i % 32 == 0 { print!("{:04x} ", offset); }
+                    if i % PAGE_W == 0 { print!("{:04x} ", offset); }
                     print!("{:02x}", self.read_mem(offset));
-                    if i % 32 == 31 { println!(); }
+                    if i % PAGE_W == PAGE_W-1 { println!(); }
                 }
             }
             _ => self.mem[pos as usize] = v,
