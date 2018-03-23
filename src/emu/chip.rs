@@ -123,22 +123,31 @@ impl Chip {
                 // read modify write
                 Inc => update_flags!(store!(load!().wrapping_add(1))),
                 Dec => update_flags!(store!(load!().wrapping_sub(1))),
-                Lsr => update_flags!(store!(load!().wrapping_shl(1))),
-                Asl => update_flags!(
-                    store!(load!().wrapping_sub(1) |
-                           if self.get_flag(StatFlag::C) {1} else {0})
-                ),
+                Lsr => {
+                    let input = load!();
+                    self.set_flag(StatFlag::C, input & 1 != 0);
+                    update_flags!(input >> 1);
+                }
+                Asl => {
+                    let input = load!();
+                    self.set_flag(StatFlag::C, input & 0x80 != 0);
+                    update_flags!(input << 1);
+                }
                 Ror => {
-                    let (val, carry) = load!().overflowing_shr(1);
-                    store!(val | if self.get_flag(StatFlag::C) {0x80} else {0});
-                    update_flags!(val);
-                    self.set_flag(StatFlag::C, carry);
+                    let input = load!();
+                    let carry_in = if self.get_flag(StatFlag::C) {0x80} else {0};
+                    let output = input >> 1 | carry_in;
+                    let carry_out = input & 1 != 0;
+                    update_flags!(store!(output));
+                    self.set_flag(StatFlag::C, carry_out);
                 }
                 Rol => {
-                    let (val, carry) = load!().overflowing_shl(1);
-                    store!(val | if self.get_flag(StatFlag::C) {1} else {0});
-                    update_flags!(val);
-                    self.set_flag(StatFlag::C, carry);
+                    let input = load!();
+                    let carry_in = if self.get_flag(StatFlag::C) {1} else {0};
+                    let output = input << 1 | carry_in;
+                    let carry_out = input & 0x80 != 0;
+                    update_flags!(store!(output));
+                    self.set_flag(StatFlag::C, carry_out);
                 }
                 // other arithmetic
                 Adc => add!(load!()),
