@@ -259,8 +259,8 @@ impl Chip {
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos] = v,
             reg::IO => print!("{}", v as char),
-            reg::PUTNUM => println!("{:02x} ", v),
-            reg::PUTDEC => println!("{:03} ", v),
+            reg::PUTNUM => print!("{:02x} ", v),
+            reg::PUTDEC => print!("{:03} ", v),
             reg::PUTPAGE => {
                 const PAGE_W: u16 = 32;
                 print!("     ");

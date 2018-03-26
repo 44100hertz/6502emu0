@@ -1,3 +1,5 @@
+* = $8000
+
 	.enc "ascii"
 	.cdef $0,$7f,$0
 	.edef "\n", $0a
@@ -16,22 +18,26 @@ put16	.macro val, into
 	lda #>\val
 	sta \into+1
 	.endm
-
-	* = $8000
-mul_test	.null "Multiply test, expects f0 0f\n"
 main
-	#put16 mul_test, string_ptr
+
+mul_test
+	jmp _start
+info	.null "Multiply f0 * 11, expects 0f f0: "
+_start
+	.put16 info, string_ptr
 	jsr print_string
 	lda #$f0
 	sta mult0
 	lda #$11
 	sta mult1
+	;; multiply
 	jsr mult
-	lda mult0
-	sta reg_putnum
+	;; print result
 	lda mult1
 	sta reg_putnum
-
+	lda mult0
+	sta reg_putnum
+done
 	brk
 
 mult
