@@ -3,11 +3,11 @@
 	.cdef $0,$7f,$0
 	.edef "\n", $0a
 
-reg_putc	= $6000
-reg_putnum	= $6001
+	reg_putc	= $6000
+	reg_putnum	= $6001
 
-mult0		= $10
-mult1		= $11
+	mult0		= $10
+	mult1		= $11
 
 main
 	#mul_test $00, $00
@@ -16,9 +16,12 @@ main
 	#mul_test $ff, $ff
 	brk
 
+	;; write a list of values with the form src, dest, src, dest, etc.
+	;; uses: a
 writev	.macro
 	vals = [\@]
 	.for i := 0, i < len(vals), i += 2
+		;; if the previous source value was the same, don't update a
 		.if i < 2 || vals[i-2] != vals[i]
 			lda vals[i]
 		.endif
@@ -26,6 +29,8 @@ writev	.macro
 	.next
 	.endm
 
+	;; write a string to reg_putc
+	;; uses: a, x
 puts	.macro s
 	strlen = len(\s)
 	.cerror strlen > $ff, "string too large"
@@ -44,6 +49,8 @@ _print
 	.endif
 	.endm
 
+	;; test a single multiplication
+	;; uses: a, x
 mul_test .macro v0, v1
 	.puts format("multiply %02x and %02x, expects %04x: ", \v0, \v1, \v0*\v1)
 	#writev #\v0, mult0, #\v1, mult1
@@ -52,6 +59,7 @@ mul_test .macro v0, v1
 	#writev #"\n", reg_putc
 	.endm
 
+	;; https://www.lysator.liu.se/~nisse/misc/6502-mul.html
 mult	.proc
 	lda #0
 	ldx #8
