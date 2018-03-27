@@ -1,9 +1,9 @@
 mod decode;
 mod chip;
 
-pub fn run(rom: Rom) {
+pub fn run(rom: Rom, mhz: f32) {
     assert!(rom.rom.len() <= 0x8000, "exceeded maximum ROM size");
-    chip::Chip::new(rom).run();
+    chip::Chip::new(rom, mhz).run();
 }
 
 // Variable opcodes with middle (argument) bits ___XXX__ set to 0

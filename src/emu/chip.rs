@@ -1,13 +1,16 @@
 // Here the "chip" is just the execution part of the processor.
-// Bugs:
-// - arithmetic has not been tested
+// Differences with real hardware:
 // - missing undocumented (cc = 11) simultanious instructions
-// - RMW instructions do not write memory twice like the real thing (WONTFIX)
+// - crossing a page is not slower on branch or indexing
+// - instruction delays untested (untestable?), maybe be inaccurate
+// - BRK just closes the emulator (intentionally)
+// - RMW instructions do not write memory twice (WONTFIX)
 
 use super::{Addr, Amode, StatFlag, Op, Rom};
 use super::decode::decode;
 
 use std::mem::transmute;
+use std::time::Duration;
 
 mod reg {
     pub const IO: u16      = 0x6000; // read: get char; write: put char
@@ -25,10 +28,11 @@ pub struct Chip {
     status: u8,
     rom: Rom,
     mem: Vec<u8>,
+    cycle_len: Duration,
 }
 
 impl Chip {
-    pub fn new(rom: Rom) -> Self {
+    pub fn new(rom: Rom, mhz: f32) -> Self {
         Chip {
             a: 0,
             x: 0,
@@ -38,6 +42,7 @@ impl Chip {
             pc: Addr::Reset as _,
             rom: rom,
             mem: vec![],
+            cycle_len: Duration::new(0, (1000.0 / mhz) as u32),
         }
     }
     pub fn run(&mut self) {
@@ -56,6 +61,7 @@ impl Chip {
                 _ => unreachable!(),
             };
             self.exec(opcode, mode, v);
+            self.cycle(2);
         }
     }
 
@@ -86,6 +92,7 @@ impl Chip {
             self.set_flag(StatFlag::Z, v == loaded);
         }}}
         macro_rules! inc{($param:expr, $offset:expr) => {{
+            self.cycle(2);
             $param = $param.wrapping_add($offset);
             update_flags!($param);
         }}}
@@ -106,6 +113,7 @@ impl Chip {
             update_flags!(self.a);
         }}}
         macro_rules! shift{($rotation:expr, $is_left:expr) => {{
+            self.cycle(2);
             let input = load!();
             let (shifted, in_bit, out_bit) = match $is_left {
                 true =>  (input << 1, 1, 0x80),
@@ -119,7 +127,9 @@ impl Chip {
         //println!("exec: {:?} {:?} {:x}", code, mode, arg);
         match code {
             Op::Branch(flag, cmp) => {
+                self.cycle(2);
                 if self.get_flag(flag) == cmp {
+                    self.cycle(1);
                     self.pc = (self.pc as i16 + (arg as i8) as i16) as u16;
                 }
             }
@@ -145,9 +155,12 @@ impl Chip {
                 And => { self.a &= load!(); update_flags!(self.a) },
                 Eor => { self.a ^= load!(); update_flags!(self.a) },
                 // control flow
-                Jmp => self.pc = arg,
-                Jma => self.pc = self.read_mem(arg) as u16 |
-                (self.read_mem((arg + 1) & 0xff) as u16 >> 8),
+                Jmp => { self.cycle(1); self.pc = arg },
+                Jma => {
+                    self.cycle(3);
+                    self.pc = self.read_mem(arg) as u16
+                        | (self.read_mem((arg + 1) & 0xff) as u16 >> 8)
+                },
                 Cmp => cmp!(self.a),
                 Cpx => cmp!(self.x),
                 Cpy => cmp!(self.y),
@@ -158,12 +171,17 @@ impl Chip {
                 // control flow
                 Brk => self.set_flag(StatFlag::B, true),
                 Jsr => {
+                    self.cycle(2);
                     let pc = self.pc - 1;
                     self.push16(pc);
                     self.pc = arg;
                 }
-                Rts => self.pc = self.pop16() + 1,
-                Rti => {self.status = self.pop(); self.pc = self.pop16()},
+                Rts => { self.cycle(2); self.pc = self.pop16() + 1 },
+                Rti => {
+                    self.cycle(1);
+                    self.status = self.pop();
+                    self.pc = self.pop16()
+                },
                 Inx => inc!(self.x, 1),
                 Iny => inc!(self.y, 1),
                 Dex => inc!(self.x, 255),
@@ -183,9 +201,9 @@ impl Chip {
                 Sed => self.set_flag(StatFlag::D, true),
                 Clv => self.set_flag(StatFlag::V, false),
                 Php => push!(self.status),
-                Plp => self.status = self.pop(),
+                Plp => { self.cycle(1); self.status = self.pop() },
                 Pha => push!(self.a),
-                Pla => self.a = self.pop(),
+                Pla => { self.cycle(1); self.a = self.pop() },
                 Nop => {},
             }
         }
@@ -221,17 +239,20 @@ impl Chip {
     fn get_addr(&mut self, mode: Amode, pos: u16) -> u16 {
         use super::Amode::*;
         match mode {
-            Zp | Abs => pos,
-            Zpx => pos << 8 | self.x as u16,
-            Zpy => pos << 8 | self.y as u16,
-            Absx => pos.wrapping_add(self.x as u16),
-            Absy => pos.wrapping_add(self.y as u16),
+            Zp => { self.cycle(1); pos },
+            Abs => { self.cycle(2); pos },
+            Zpx => { self.cycle(2); pos << 8 | self.x as u16 },
+            Zpy => { self.cycle(2); pos << 8 | self.y as u16 },
+            Absx => { self.cycle(2); pos.wrapping_add(self.x as u16) },
+            Absy => { self.cycle(2); pos.wrapping_add(self.y as u16) },
             Idrx => {
+                self.cycle(4);
                 let pos = pos + self.x as u16;
                 self.read_mem(pos) as u16 |
                 ((self.read_mem(pos+1) as u16) << 8)
             },
             Idry => {
+                self.cycle(4);
                 let offset = self.read_mem(pos) as u16 | (self.read_mem(pos+1) as u16) << 8;
                 //println!("indirect offset: {:x}", offset);
                 offset.wrapping_add(self.y as u16)
@@ -277,7 +298,12 @@ impl Chip {
         }
     }
 
+    fn cycle(&self, cycles: u32) {
+        ::std::thread::sleep(self.cycle_len * cycles);
+    }
+
     fn pop(&mut self) -> u8 {
+        self.cycle(1);
         self.sp = self.sp.wrapping_add(1);
         let ret = self.mem[0x100 + self.sp as usize];
         //println!("pop: {:x} at sp = {:x}", ret, self.sp);
@@ -290,6 +316,7 @@ impl Chip {
         self.pop() as u16 | (self.pop() as u16) << 8
     }
     fn push(&mut self, data: u8) {
+        self.cycle(1);
         //println!("push: {:x} at sp = {:x}", data, self.sp);
         self.mem[0x100 + self.sp as usize] = data;
         self.sp = self.sp.wrapping_sub(1);

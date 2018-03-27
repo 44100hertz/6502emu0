@@ -13,5 +13,5 @@ fn main() {
         offset: 0x8000,
     };
 
-    emu::run(rom);
+    emu::run(rom, 0.01);
 }
