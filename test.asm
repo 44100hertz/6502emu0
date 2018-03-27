@@ -1,5 +1,4 @@
-* = $8000
-
+	* = $8000
 	.enc "ascii"
 	.cdef $0,$7f,$0
 	.edef "\n", $0a
@@ -11,34 +10,41 @@ string_ptr	:= $0
 mult0		:= $10
 mult1		:= $11
 
+main
+	.mul_test $00, $00
+	.mul_test $04, $04
+	.mul_test $10, $10
+	.mul_test $ff, $ff
+	brk
 
 put16	.macro val, into
-	lda #<\val
+	lda <\val
 	sta \into
-	lda #>\val
+	lda >\val
 	sta \into+1
 	.endm
-main
 
-mul_test
-	jmp _start
-info	.null "Multiply f0 * 11, expects 0f f0: "
-_start
-	.put16 info, string_ptr
+mul_test .macro v0, v1
+	jmp start
+	;; info
+info	.null format("multiply %02x and %02x, expects %04x: ", \v0, \v1, \v0*\v1)
+start
+	.put16 #info, string_ptr
 	jsr print_string
-	lda #$f0
-	sta mult0
-	lda #$11
-	sta mult1
 	;; multiply
+	lda #\v0
+	sta mult0
+	lda #\v1
+	sta mult1
 	jsr mult
 	;; print result
 	lda mult1
 	sta reg_putnum
 	lda mult0
 	sta reg_putnum
-done
-	brk
+	lda #"\n"
+	sta reg_putc
+	.endm
 
 mult
 	lda #0
