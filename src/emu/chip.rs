@@ -5,12 +5,14 @@
 // - instruction delays untested (untestable?), maybe be inaccurate
 // - BRK just closes the emulator (intentionally)
 // - RMW instructions do not write memory twice (WONTFIX)
+// Bugs:
+// - After 2^32 cycles, speed becomes unbounded. (about an hour at 1mhz)
 
 use super::{Addr, Amode, StatFlag, Op, Rom};
 use super::decode::decode;
 
-use std::mem::transmute;
-use std::time::Duration;
+use std::mem::transmute; // for enums
+use std::time::{Instant, Duration};
 
 mod reg {
     pub const IO: u16      = 0x6000; // read: get char; write: put char
@@ -28,11 +30,14 @@ pub struct Chip {
     status: u8,
     rom: Rom,
     mem: Vec<u8>,
+    start_time: Instant,
+    cpu_time: Duration,
     cycle_len: Duration,
+    lag_count: u32,
 }
 
 impl Chip {
-    pub fn new(rom: Rom, mhz: f32) -> Self {
+    pub fn new(rom: Rom, mhz: f64) -> Self {
         Chip {
             a: 0,
             x: 0,
@@ -42,7 +47,10 @@ impl Chip {
             pc: Addr::Reset as _,
             rom: rom,
             mem: vec![],
+            start_time: Instant::now(),
             cycle_len: Duration::new(0, (1000.0 / mhz) as u32),
+            cpu_time: Duration::new(0, 0),
+            lag_count: 0,
         }
     }
     pub fn run(&mut self) {
@@ -298,10 +306,6 @@ impl Chip {
         }
     }
 
-    fn cycle(&self, cycles: u32) {
-        ::std::thread::sleep(self.cycle_len * cycles);
-    }
-
     fn pop(&mut self) -> u8 {
         self.cycle(1);
         self.sp = self.sp.wrapping_add(1);
@@ -339,5 +343,20 @@ impl Chip {
     fn set_flag(&mut self, flag: StatFlag, value: bool) {
         let bit = if value { flag as u8 } else { 0 };
         self.status = self.status & (0xff ^ flag as u8) | bit;
+    }
+
+    fn cycle(&mut self, cycles: u32) {
+        self.cpu_time += self.cycle_len * cycles;
+        let real_time = self.start_time.elapsed();
+        if let Some(wait_time) = self.cpu_time.checked_sub(real_time) {
+            self.lag_count = 0;
+            ::std::thread::sleep(wait_time);
+        } else {
+            self.lag_count += cycles;
+            if self.lag_count > 1000 {
+                eprintln!("!! lag !!");
+                self.lag_count = 0;
+            }
+        }
     }
 }
