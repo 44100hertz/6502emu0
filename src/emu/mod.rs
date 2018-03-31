@@ -46,6 +46,16 @@ pub enum Amode {
     Nothing, Accum, Rela, Immed,
     Zp, Zpx, Zpy, Idrx, Idry, Abs, Absx, Absy, Error,
 }
+impl Amode {
+    fn width(&self) -> u8 {
+        use self::Amode::*;
+        match *self {
+            Nothing | Accum | Error => 0,
+            Rela | Immed | Zp | Zpx | Zpy | Idrx | Idry => 1,
+            Abs | Absx | Absy => 2,
+        }
+    }
+}
 #[allow(dead_code)]
 pub enum Addr {
     Reset = 0xfffa,

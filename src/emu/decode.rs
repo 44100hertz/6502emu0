@@ -1,7 +1,10 @@
+// Mode implies width! Please do not store width, just mode.
+// Write a simple function to map one to the other, or maybe just hardcode it into decoding.
+
 use super::{Op, StandardOp, SpecialOp, Amode, StatFlag};
 use std::mem::transmute;
 
-pub fn decode(code: u8) -> (u8, Op, Amode) {
+pub fn decode(code: u8) -> (Op, Amode) {
     use self::Amode::*;
 
     // branch codes
@@ -16,7 +19,7 @@ pub fn decode(code: u8) -> (u8, Op, Amode) {
             },
             code >> 5 & 1 != 0, // true means test against 0
         );
-        return (1, op, Rela);
+        return (op, Rela);
     }
 
     // special codes
@@ -24,12 +27,12 @@ pub fn decode(code: u8) -> (u8, Op, Amode) {
         code & 0x0f == 0x8 ||
         code & 0x0f == 0xA && code >= 0x80
     {
-        let (width, mode) = if code == SpecialOp::Jsr as u8 {
-            (2, Abs)
+        let mode = if code == SpecialOp::Jsr as u8 {
+            Abs
         } else {
-            (0, Nothing)
+            Nothing
         };
-        return (width, Op::Special(code), mode);
+        return (Op::Special(code), mode);
     }
 
     // standard (variable) codes
@@ -37,36 +40,36 @@ pub fn decode(code: u8) -> (u8, Op, Amode) {
     let addr_bits = code >> 2 & 7;
     let code_bits = code & 3;
 
-    let (width, mode) = match addr_bits {
+    let mode = match addr_bits {
         0 => match code_bits {
-            1 => (1, Idrx),
-            _ => (1, Immed),
+            1 => Idrx,
+            _ => Immed,
         }
-        1 => (1, Zp),
+        1 => Zp,
         2 => match code_bits {
-            1 => (1, Immed),
-            2 => (0, Accum),
-            _ => (0, Error),
+            1 => Immed,
+            2 => Accum,
+            _ => Error,
         }
-        3 => (2, Abs),
+        3 => Abs,
         4 => match code_bits {
-            1 => (1, Idry),
-            _ => (0, Error),
+            1 => Idry,
+            _ => Error,
         }
         5 => match unsafe { transmute(op) } {
-            StandardOp::Stx | StandardOp::Ldx => (1, Zpy),
-            _ => (1, Zpx),
+            StandardOp::Stx | StandardOp::Ldx => Zpy,
+            _ => Zpx,
         }
         6 => match code_bits {
-            1 => (2, Absy),
-            _ => (0, Error),
+            1 => Absy,
+            _ => Error,
         }
         7 => match unsafe { transmute(op) } {
-            StandardOp::Ldx => (2, Absy),
-            _ => (2, Absx),
+            StandardOp::Ldx => Absy,
+            _ => Absx,
         }
         _ => unreachable!(),
     };
 
-    (width, self::Op::Standard(op), mode)
+    (self::Op::Standard(op), mode)
 }

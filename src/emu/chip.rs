@@ -59,7 +59,8 @@ impl Chip {
         while !self.get_flag(StatFlag::B) {
 //            println!("pc   a  x  y  SV_BDIZC");
 //            println!("{:04x} {:02x} {:02x} {:02x} {:08b}", self.pc, self.a, self.x, self.y, self.status);
-            let (width, opcode, mode) = decode(self.read_mem(self.pc));
+            let (opcode, mode) = decode(self.read_mem(self.pc));
+            let width = mode.width();
             let arg_pos = self.pc + 1;
             self.pc += width as u16 + 1;
             let v = match width {
