@@ -15,10 +15,11 @@ use std::mem::transmute; // for enums
 use std::time::{Instant, Duration};
 
 mod reg {
-    pub const IO: u16      = 0x6000; // read: get char; write: put char
+    pub const PUTCHAR: u16 = 0x6000; // read: get char; write: put char
     pub const PUTNUM: u16  = 0x6001; // writes hex value
     pub const PUTDEC: u16  = 0x6002; // writes decimal value
     pub const PUTPAGE: u16 = 0x6003; // writes a 256 byte mem region
+    pub const PUTREGS: u16 = 0x6004;
 }
 
 pub struct Chip {
@@ -57,8 +58,6 @@ impl Chip {
         self.mem.resize(0x10000 - self.rom.offset as usize, 0);
         self.pc = self.rom.get16(self.pc);
         while !self.get_flag(StatFlag::B) {
-//            println!("pc   a  x  y  SV_BDIZC");
-//            println!("{:04x} {:02x} {:02x} {:02x} {:08b}", self.pc, self.a, self.x, self.y, self.status);
             let (opcode, mode) = decode(self.read_mem(self.pc));
             let width = mode.width();
             let arg_pos = self.pc + 1;
@@ -275,7 +274,7 @@ impl Chip {
         //println!("read memory at: {:x}", pos);
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos],
-            reg::IO => {
+            reg::PUTCHAR => {
                 use std::io::{Read, stdin};
                 let mut tmp = [0u8; 1];
                 stdin().read(&mut tmp).expect("failed to read stdin");
@@ -288,7 +287,7 @@ impl Chip {
         //println!("write memory at: {:x}", pos)
         match pos {
             _ if pos >= self.rom.offset => self.rom[pos] = v,
-            reg::IO => print!("{}", v as char),
+            reg::PUTCHAR => print!("{}", v as char),
             reg::PUTNUM => print!("{:02x} ", v),
             reg::PUTDEC => print!("{:03} ", v),
             reg::PUTPAGE => {
@@ -302,6 +301,11 @@ impl Chip {
                     print!("{:02x}", self.read_mem(offset));
                     if i % PAGE_W == PAGE_W-1 { println!(); }
                 }
+            }
+            reg::PUTREGS => {
+                println!("pc   a  x  y  SV_BDIZC");
+                println!("{:04x} {:02x} {:02x} {:02x} {:08b}",
+                         self.pc, self.a, self.x, self.y, self.status);
             }
             _ => self.mem[pos as usize] = v,
         }

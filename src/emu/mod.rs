@@ -44,7 +44,8 @@ pub enum Op {
 #[derive(Debug, Copy, Clone)]
 pub enum Amode {
     Nothing, Accum, Rela, Immed,
-    Zp, Zpx, Zpy, Idrx, Idry, Abs, Absx, Absy, Error,
+    Zp, Zpx, Zpy, Idrx, Idry, Abs, Absx, Absy,
+    Error,
 }
 impl Amode {
     fn width(&self) -> u8 {
