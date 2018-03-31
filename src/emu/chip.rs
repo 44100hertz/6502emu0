@@ -5,8 +5,6 @@
 // - instruction delays untested (untestable?), maybe be inaccurate
 // - BRK just closes the emulator (intentionally)
 // - RMW instructions do not write memory twice (WONTFIX)
-// Bugs:
-// - After 2^32 cycles, speed becomes unbounded. (about an hour at 1mhz)
 
 use super::{Addr, Amode, StatFlag, Op, Rom};
 use super::decode::decode;
@@ -19,7 +17,7 @@ mod reg {
     pub const PUTNUM: u16  = 0x6001; // writes hex value
     pub const PUTDEC: u16  = 0x6002; // writes decimal value
     pub const PUTPAGE: u16 = 0x6003; // writes a 256 byte mem region
-    pub const PUTREGS: u16 = 0x6004;
+    pub const PUTREGS: u16 = 0x6004; // write processor status
 }
 
 pub struct Chip {
