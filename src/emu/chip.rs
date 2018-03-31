@@ -109,14 +109,14 @@ impl Chip {
             update_flags!($dest);
         }}}
         macro_rules! add{($param:expr) => {{
-            let val = $param as u16;
-            let sum = val + self.a as u16 +
-                if self.get_flag(StatFlag::C) {1} else {0};
-            self.set_flag(StatFlag::C, sum > 0xff);
             let a = self.a;
+            let val = $param as u16;
+            let carry_in = if self.get_flag(StatFlag::C) { 1 } else { 0 };
+            let sum = val + self.a as u16 + carry_in;
+            self.set_flag(StatFlag::C, sum > 0xff);
             self.set_flag(StatFlag::V,
-                          val as u8 & 0x80 == a & 0x80 &&
-                          val & 0x80 != sum & 0x80);
+                          val as u8 & 0x80 == a & 0x80 && // input signs same
+                          val & 0x80 != sum & 0x80); // result has other sign
             self.a = sum as u8;
             update_flags!(self.a);
         }}}

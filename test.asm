@@ -6,14 +6,18 @@
 	reg_putc	= $6000
 	reg_putnum	= $6001
 
-	mult0		= $10
-	mult1		= $11
+	mult0	= $10
+	mult1	= $11
 
 main
 	#mul_test $00, $00
 	#mul_test $04, $04
 	#mul_test $10, $10
 	#mul_test $ff, $ff
+	#overflow_test $00, $00, 0
+	#overflow_test $ff, $00, 0
+	#overflow_test $7f, $7f, 1
+	#overflow_test $80, $80, 1
 	brk
 
 	;; write a list of values with the form src, dest, src, dest, etc.
@@ -32,7 +36,7 @@ writev	.macro
 	;; write a string to reg_putc
 	;; uses: a, x
 puts	.macro s
-	strlen = len(\s)
+	strlen = len(bytes(\s))
 	.cerror strlen > $ff, "string too large"
 	.if strlen > 0
 	;; start x at a higher place so that it wraps to 0, eliminating a
@@ -57,6 +61,18 @@ mul_test .macro v0, v1
 	jsr mult
 	#writev mult1, reg_putnum, mult0, reg_putnum
 	#writev #"\n", reg_putc
+	.endm
+
+overflow_test .macro v0, v1, expect
+	.puts format("overflow %02x + %02x, expects %s: ", \v0, \v1, \expect != 0 ? "true" : "false")
+	lda #\v0
+	adc #\v1
+	bvs _set
+	.puts "false\n"
+	bvc _end
+_set:
+	.puts "true\n"
+_end:
 	.endm
 
 	;; https://www.lysator.liu.se/~nisse/misc/6502-mul.html
