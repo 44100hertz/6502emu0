@@ -18,6 +18,11 @@ main
 	#overflow_test $ff, $00, 0
 	#overflow_test $7f, $7f, 1
 	#overflow_test $80, $80, 1
+	.puts "Illegal code test: wrote to A and X, expect 13 13: "
+	lax #$13
+	sta reg_putnum
+	stx reg_putnum
+	.writev #"\n", reg_putc
 	brk
 
 	;; write a list of values with the form src, dest, src, dest, etc.

@@ -1,6 +1,7 @@
 // Here the "chip" is just the execution part of the processor.
 // Differences with real hardware:
-// - missing undocumented (cc = 11) simultanious instructions
+// - simultanious instructions take longer
+// - clashing simultanious instructions work in a normal way
 // - crossing a page is not slower on branch or indexing
 // - instruction delays untested (untestable?), maybe be inaccurate
 // - BRK just closes the emulator (intentionally)
@@ -73,64 +74,22 @@ impl Chip {
 
     fn exec(&mut self, code: Op, mode: Amode, arg: u16) {
         use super::SpecialOp::*;
-        use super::StandardOp::*;
 
-        macro_rules! load{() => {{
-            let tmp = self.load(mode, arg);
-            tmp
-        }}}
-        macro_rules! store{($e:expr) => {{
-            let v = $e;
-            self.store(mode, arg, v);
-            v
-        }}}
-        macro_rules! update_flags{($e:expr) => {{
-            let v = $e;
-            self.update_flags(v)
-        }}}
         macro_rules! push{($e:expr) => {{
             let v = $e;
             self.push(v)
         }}}
-        macro_rules! cmp{($e:expr) => {{
-            let v = $e;
-            let loaded = load!();
-            self.set_flag(StatFlag::Z, v == loaded);
-        }}}
         macro_rules! inc{($param:expr, $offset:expr) => {{
             self.cycle(2);
             $param = $param.wrapping_add($offset);
-            update_flags!($param);
+            let tmp = $param;
+            self.update_flags(tmp);
         }}}
         macro_rules! transfer{($src:expr, $dest:expr) => {{
             $dest = $src;
-            update_flags!($dest);
+            let tmp = $dest;
+            self.update_flags(tmp);
         }}}
-        macro_rules! add{($param:expr) => {{
-            let a = self.a;
-            let val = $param as u16;
-            let carry_in = if self.get_flag(StatFlag::C) { 1 } else { 0 };
-            let sum = val + self.a as u16 + carry_in;
-            self.set_flag(StatFlag::C, sum > 0xff);
-            self.set_flag(StatFlag::V,
-                          val as u8 & 0x80 == a & 0x80 && // input signs same
-                          val & 0x80 != sum & 0x80); // result has other sign
-            self.a = sum as u8;
-            update_flags!(self.a);
-        }}}
-        macro_rules! shift{($rotation:expr, $is_left:expr) => {{
-            self.cycle(2);
-            let input = load!();
-            let (shifted, in_bit, out_bit) = match $is_left {
-                true =>  (input << 1, 1, 0x80),
-                false => (input >> 1, 0x80, 1),
-            };
-            let carry_in = $rotation && self.get_flag(StatFlag::C);
-            let output = shifted | if carry_in {in_bit} else {0};
-            self.set_flag(StatFlag::C, input & out_bit != 0);
-            update_flags!(store!(output));
-        }}}
-        //println!("exec: {:?} {:?} {:x}", code, mode, arg);
         match code {
             Op::Branch(flag, cmp) => {
                 self.cycle(2);
@@ -139,39 +98,10 @@ impl Chip {
                     self.pc = (self.pc as i16 + (arg as i8) as i16) as u16;
                 }
             }
-            Op::Standard(op) => match unsafe { transmute(op) } {
-                // load/store
-                Lda => self.a = load!(),
-                Ldx => self.x = load!(),
-                Ldy => self.y = load!(),
-                Sta => { store!(self.a); },
-                Stx => { store!(self.x); },
-                Sty => { store!(self.y); },
-                // read modify write
-                Inc => update_flags!(store!(load!().wrapping_add(1))),
-                Dec => update_flags!(store!(load!().wrapping_sub(1))),
-                Lsr => shift!(false, false),
-                Asl => shift!(false, true),
-                Ror => shift!(true,  false),
-                Rol => shift!(true,  true),
-                // other arithmetic
-                Adc => add!(load!()),
-                Sbc => add!(load!() ^ 0xff),
-                Ora => { self.a |= load!(); update_flags!(self.a) },
-                And => { self.a &= load!(); update_flags!(self.a) },
-                Eor => { self.a ^= load!(); update_flags!(self.a) },
-                // control flow
-                Jmp => { self.cycle(1); self.pc = arg },
-                Jma => {
-                    self.cycle(3);
-                    self.pc = self.read_mem(arg) as u16
-                        | (self.read_mem((arg + 1) & 0xff) as u16 >> 8)
-                },
-                Cmp => cmp!(self.a),
-                Cpx => cmp!(self.x),
-                Cpy => cmp!(self.y),
-                // misc
-                Bit => { load!(); },
+            Op::Standard(op, None) => self.exec_standard(op, mode, arg),
+            Op::Standard(op1, Some(op2)) => {
+                self.exec_standard(op1, mode, arg);
+                self.exec_standard(op2, mode, arg);
             }
             Op::Special(op) => match unsafe { transmute(op) } {
                 // control flow
@@ -215,6 +145,85 @@ impl Chip {
         }
     }
 
+    fn exec_standard(&mut self, op: u8, mode: Amode, arg: u16) {
+        use super::StandardOp::*;
+        macro_rules! update_flags{($e:expr) => {{
+            let v = $e;
+            self.update_flags(v)
+        }}}
+        macro_rules! load{() => {{
+            let tmp = self.load(mode, arg);
+            tmp
+        }}}
+        macro_rules! store{($e:expr) => {{
+            let v = $e;
+            self.store(mode, arg, v);
+            v
+        }}}
+        macro_rules! cmp{($e:expr) => {{
+            let v = $e;
+            let loaded = load!();
+            self.set_flag(StatFlag::Z, v == loaded);
+        }}}
+        macro_rules! add{($param:expr) => {{
+            let a = self.a;
+            let val = $param as u16;
+            let carry_in = if self.get_flag(StatFlag::C) { 1 } else { 0 };
+            let sum = val + self.a as u16 + carry_in;
+            self.set_flag(StatFlag::C, sum > 0xff);
+            self.set_flag(StatFlag::V,
+                          val as u8 & 0x80 == a & 0x80 && // input signs same
+                          val & 0x80 != sum & 0x80); // result has other sign
+            self.a = sum as u8;
+            update_flags!(self.a);
+        }}}
+        macro_rules! shift{($rotation:expr, $is_left:expr) => {{
+            self.cycle(2);
+            let input = load!();
+            let (shifted, in_bit, out_bit) = match $is_left {
+                true =>  (input << 1, 1, 0x80),
+                false => (input >> 1, 0x80, 1),
+            };
+            let carry_in = $rotation && self.get_flag(StatFlag::C);
+            let output = shifted | if carry_in {in_bit} else {0};
+            self.set_flag(StatFlag::C, input & out_bit != 0);
+            update_flags!(store!(output));
+        }}}
+        match unsafe { transmute(op) } {
+            // load/store
+            Lda => self.a = load!(),
+            Ldx => self.x = load!(),
+            Ldy => self.y = load!(),
+            Sta => { store!(self.a); },
+            Stx => { store!(self.x); },
+            Sty => { store!(self.y); },
+            // read modify write
+            Inc => update_flags!(store!(load!().wrapping_add(1))),
+            Dec => update_flags!(store!(load!().wrapping_sub(1))),
+            Lsr => shift!(false, false),
+            Asl => shift!(false, true),
+            Ror => shift!(true,  false),
+            Rol => shift!(true,  true),
+            // other arithmetic
+            Adc => add!(load!()),
+            Sbc => add!(load!() ^ 0xff),
+            Ora => { self.a |= load!(); update_flags!(self.a) },
+            And => { self.a &= load!(); update_flags!(self.a) },
+            Eor => { self.a ^= load!(); update_flags!(self.a) },
+            // control flow
+            Jmp => { self.cycle(1); self.pc = arg },
+            Jma => {
+                self.cycle(3);
+                self.pc = self.read_mem(arg) as u16
+                    | (self.read_mem((arg + 1) & 0xff) as u16 >> 8)
+            },
+            Cmp => cmp!(self.a),
+            Cpx => cmp!(self.x),
+            Cpy => cmp!(self.y),
+            // misc
+            Bit => { load!(); },
+        }
+    }
 
     fn load(&mut self, mode: Amode, pos: u16) -> u8 {
         let ret = match mode {
@@ -264,7 +273,7 @@ impl Chip {
                 offset.wrapping_add(self.y as u16)
             },
             Accum | Immed | Nothing | Rela => unreachable!(),
-            Error => panic!("Invalid opcode"),
+            Error => 0,
         }
     }
 

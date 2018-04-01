@@ -38,7 +38,7 @@ pub enum SpecialOp {
 #[derive(Debug, Copy, Clone)]
 pub enum Op {
     Special(u8),
-    Standard(u8),
+    Standard(u8, Option<u8>),
     Branch(StatFlag, bool),
 }
 #[derive(Debug, Copy, Clone)]
